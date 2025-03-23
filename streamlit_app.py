@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -30,7 +31,6 @@ if hasattr(st, 'secrets'):
 else:
     st.warning("No Streamlit secrets configured")
 
-
 def get_credentials():
     if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
         return st.secrets["gcp_service_account"]
@@ -46,7 +46,6 @@ def get_credentials():
         except FileNotFoundError:
             st.error("No Google credentials found.")
             return None
-
 
 @st.cache_resource
 def connect_sheets():
@@ -72,7 +71,6 @@ def connect_sheets():
     except Exception as e:
         st.error(f"Failed to connect to Google Sheets: {e}")
         return None
-
 
 @st.cache_data(ttl=300)
 def load_all_show_data():
@@ -109,7 +107,7 @@ def load_all_show_data():
 
                             if 'Runtime' in df.columns:
                                 try:
-                                    runtime_values = df['Runtime'].str.extract('(\\d+)').astype(float, errors='ignore')
+                                    runtime_values = df['Runtime'].astype(str).str.extract('(\d+)').astype(float)
                                     show_metadata[sheet.title]['longest_episode'] = runtime_values.max().max() if not runtime_values.isna().all().all() else None
                                 except:
                                     show_metadata[sheet.title]['longest_episode'] = None
@@ -123,17 +121,6 @@ def load_all_show_data():
                 st.warning(f"Couldn't load sheet {sheet.title}: {e}")
 
     return all_shows, show_metadata
-
-
-# Add your entire dashboard logic here, including:
-# - display_overview(shows, metadata)
-# - display_show_details(shows, metadata)
-# - display_episode_tracker(shows, metadata)
-# - display_analysis(shows, metadata)
-# - main() that sets up sidebar navigation and renders the chosen page
-
-# DASHBOARD COMPONENTS
-
 # Overview dashboard
 def display_overview(shows, metadata):
     st.header("📊 TV Shows Overview")
@@ -162,18 +149,58 @@ def display_overview(shows, metadata):
     # Calculate watching progress
     for show_name, df in shows.items():
         if 'Watched' in df.columns:
-    # Handle different "Yes" values
-                watched_count = sum(1 for watched in df['Watched'] if 
-                   (watched == 'Yes' or 
-                    str(watched).upper() in ['TRUE', 'YES', '1'] or
-                    watched is True)) in_progress = (df['Watched'] == 'In Progress').sum()
+            # Handle different "Yes" values
+            watched_count = sum(1 for watched in df['Watched'] if 
+                (watched == 'Yes' or 
+                str(watched).upper() in ['TRUE', 'YES', '1'] or
+                watched is True))
+            in_progress = (df['Watched'] == 'In Progress').sum()
             total_count = len(df)
-            
+                
             # Calculate progress percentage
             if total_count > 0:
                 progress_pct = (watched_count / total_count) * 100
             else:
                 progress_pct = 0
+                    
+            # Display in expander with progress bar
+            with st.expander(f"{show_name} ({watched_count}/{total_count} episodes watched)"):
+                st.progress(progress_pct / 100)
+                
+                # Show ratings if available
+                if 'Rating' in df.columns:
+                    # Convert to numeric, handling non-numeric values
+                    numeric_ratings = pd.to_numeric(df['Rating'], errors='coerce')
+                    if numeric_ratings.notna().any():
+                        avg_rating = numeric_ratings.mean()
+                        st.write(f"Average Rating: {avg_rating:.1f}/10")
+                
+                # Quick stat columns
+                stat_col1, stat_col2 = st.columns(2)
+                with stat_col1:
+                    st.write(f"Seasons: {df['Season'].nunique() if 'Season' in df.columns else 'N/A'}")
+                    if 'Personal Rating' in df.columns:
+                        # Convert to numeric, handling non-numeric values
+                        numeric_personal = pd.to_numeric(df['Personal Rating'], errors='coerce')
+                        if numeric_personal.notna().any():
+                            avg_personal = numeric_personal.mean()
+                            st.write(f"Your Average Rating: {avg_personal:.1f}/10")
+                with stat_col2:
+                    st.write(f"Episodes Remaining: {total_count - watched_count}")
+                    st.write(f"Completion: {progress_pct:.1f}%")
+            # Handle different "Yes" values
+            watched_count = sum(1 for watched in df['Watched'] if 
+                (watched == 'Yes' or 
+                str(watched).upper() in ['TRUE', 'YES', '1'] or
+                watched is True))
+            in_progress = (df['Watched'] == 'In Progress').sum()
+            total_count = len(df)
+            
+        # Calculate progress percentage
+        if total_count > 0:
+            progress_pct = (watched_count / total_count) * 100
+        else:
+            progress_pct = 0
                 
             # Display in expander with progress bar
             with st.expander(f"{show_name} ({watched_count}/{total_count} episodes watched)"):
@@ -237,6 +264,8 @@ def display_overview(shows, metadata):
 
 # Show Details dashboard
 def display_show_details(shows, metadata):
+    # Ensure metadata is used
+    pass
     st.header("🎬 Show Details")
     
     if not shows:
@@ -368,7 +397,9 @@ def display_show_details(shows, metadata):
                     st.info("No valid runtime data available for this show.")
             else:
                 st.info("No runtime data available for this show.")
-
+def display_episode_tracker(shows, metadata):
+    # Ensure metadata is used
+    pass
 # Episode Tracker dashboard
 def display_episode_tracker(shows, metadata):
     st.header("👁️ Episode Tracker")
@@ -424,10 +455,6 @@ def display_episode_tracker(shows, metadata):
         
         # Apply filters
         filtered_df = df.copy()
-        
-        if selected_seasons:
-            filtered_df = filtered_df[filtered_df['Season'].isin(selected_seasons)]
-        
 if watch_status != "All":
     if watch_status == "Watched":
         # Create a mask for different "Yes" values
@@ -443,7 +470,6 @@ if watch_status != "All":
         filtered_df = filtered_df[unwatched_mask]
     elif watch_status == "In Progress":
         filtered_df = filtered_df[filtered_df['Watched'] == 'In Progress']
-        
         if favorites_only:
             filtered_df = filtered_df[filtered_df['Favorite'] == 'Yes']
         
@@ -458,11 +484,10 @@ if watch_status != "All":
             st.info("No episodes match your filters.")
         else:
             # Progress metrics
-# Handle different "Yes" values
-watched_count = sum(1 for watched in filtered_df['Watched'] if 
-                   (watched == 'Yes' or 
-                    str(watched).upper() in ['TRUE', 'YES', '1'] or
-                    watched is True))            in_progress = (filtered_df['Watched'] == 'In Progress').sum()
+            watched_count = sum(1 for watched in filtered_df['Watched'] if 
+                                (watched == 'Yes' or 
+                                 str(watched).upper().isin(['TRUE', 'YES', '1']) or
+                                 watched is True))
             total_count = len(filtered_df)
             
             progress_col1, progress_col2, progress_col3 = st.columns(3)
@@ -475,6 +500,7 @@ watched_count = sum(1 for watched in filtered_df['Watched'] if
                 else:
                     st.metric("Progress", "0%")
             with progress_col3:
+                in_progress = (filtered_df['Watched'] == 'In Progress').sum()
                 st.metric("In Progress", in_progress)
             
             # Episode list with tracking options
@@ -486,8 +512,7 @@ watched_count = sum(1 for watched in filtered_df['Watched'] if
                 rating = row.get('Rating', 'N/A')
                 synopsis = row.get('Synopsis', 'No synopsis available')
                 
-                # Create a unique key for each widget
-                key_prefix = f"{selected_show}_S{season_num}E{episode_num}_{i}"
+                key_prefix = f"{selected_show}_S{season_num}E{episode_num}_{i}" if 'selected_show' in locals() else "undefined_key"
                 
                 # Create an expander for each episode
                 with st.expander(f"S{season_num}E{episode_num} - {episode_title}"):
@@ -503,10 +528,9 @@ watched_count = sum(1 for watched in filtered_df['Watched'] if
                             st.write(f"**Runtime:** {row['Runtime']}")
                     
                     with action_col:
-    # Watched as checkbox
-    current_status = row.get('Watched', 'No')
-    # Make sure we handle TRUE values correctly
+                        current_status = row.get('Watched', 'No')
     if isinstance(current_status, bool):
+        current_status = "Yes" if current_status else "No"
         current_status = "Yes" if current_status else "No"
     elif str(current_status).upper() in ['TRUE', 'YES', '1']:
         current_status = "Yes"
@@ -517,118 +541,121 @@ watched_count = sum(1 for watched in filtered_df['Watched'] if
         key=f"{key_prefix}_watched"
     ) else "No"
                         
-                        # Personal Rating as dropdown
-                        current_rating = row.get('Personal Rating', '')
-                        try:
-                            # Try to convert to int, but handle empty strings and other non-numeric values
-                            if pd.notna(current_rating) and current_rating != '':
-                                current_rating = int(float(current_rating))
-                            else:
-                                current_rating = ''
-                        except:
-                            current_rating = ''
-                        
-                        # Create options with empty option first
-                        rating_options = ['']+[str(i) for i in range(1, 11)]
-                        selected_index = rating_options.index(str(current_rating)) if str(current_rating) in rating_options else 0
-                        
-                        new_rating = st.selectbox(
-                            "Your Rating",
-                            options=rating_options,
-                            index=selected_index,
-                            key=f"{key_prefix}_rating"
-                        )
-                        
-                        # Favorite as checkbox
-                        current_favorite = row.get('Favorite', 'No')
-                        new_favorite = st.checkbox(
-                            "Favorite",
-                            value=(current_favorite == 'Yes'),
-                            key=f"{key_prefix}_favorite"
-                        )
-                        
-                        # Watch date input
-                        # Only show if watched or manually expanded
-                        show_date = new_status == 'Yes' or current_status == 'Yes'
-                        
-                        if show_date:
-                            current_date = row.get('Watch Date', '')
-                            default_date = datetime.now().date()
-                            
-                            # Try to parse existing date in various formats
-                            if current_date and pd.notna(current_date) and current_date != '':
-                                try:
-                                    # Try multiple formats
-                                    for fmt in ['%m-%d-%Y', '%Y-%m-%d', '%m/%d/%Y']:
-                                        try:
-                                            default_date = datetime.strptime(str(current_date), fmt).date()
-                                            break
-                                        except:
-                                            pass
-                                except:
-                                    pass
-                            
-                            new_date = st.date_input(
-                                "Date Watched",
-                                default_date,
-                                key=f"{key_prefix}_date",
-                                format="MM/DD/YYYY"
-                            )
-                            
-                            # Format date as mm-dd-yyyy for storage
-                            formatted_date = new_date.strftime('%m-%d-%Y') if new_date else ''
-                        else:
-                            formatted_date = row.get('Watch Date', '')
-                        
-                        # Update button
-                        if st.button("Update", key=f"{key_prefix}_update"):
-                            # Get the worksheet
-                            try:
-                                spreadsheet = connect_sheets()
-                                sheet = spreadsheet.worksheet(selected_show)
-                                
-                                # Get the row number in the sheet (add 2 to account for 0-indexing and header row)
-                                sheet_row = idx + 2
-                                
-                                # Update the cells
-                                updates = []
-                                
-                                # Find column indexes
-                                header_row = sheet.row_values(1)
-                                watched_col = header_row.index('Watched') + 1 if 'Watched' in header_row else None
-                                rating_col = header_row.index('Personal Rating') + 1 if 'Personal Rating' in header_row else None
-                                favorite_col = header_row.index('Favorite') + 1 if 'Favorite' in header_row else None
-                                date_col = header_row.index('Watch Date') + 1 if 'Watch Date' in header_row else None
-                                
-                                # Update watched status
-                                if watched_col:
-                                    sheet.update_cell(sheet_row, watched_col, new_status)
-                                    updates.append(f"Watched={new_status}")
-                                
-                                # Update personal rating
-                                if rating_col:
-                                    sheet.update_cell(sheet_row, rating_col, new_rating)
-                                    updates.append(f"Rating={new_rating}")
-                                
-                                # Update favorite
-                                if favorite_col:
-                                    sheet.update_cell(sheet_row, favorite_col, 'Yes' if new_favorite else 'No')
-                                    updates.append(f"Favorite={'Yes' if new_favorite else 'No'}")
-                                
-                                # Update watch date
-                                if date_col and show_date:
-                                    sheet.update_cell(sheet_row, date_col, formatted_date)
-                                    updates.append(f"Date={formatted_date}")
-                                
-                                st.success(f"Episode updated! {', '.join(updates)}")
-                                
-                                # Clear the cache to reflect changes on next load
-                                load_all_show_data.clear()
-                            
-                            except Exception as e:
-                                st.error(f"Failed to update: {e}")
+current_rating = row.get('Personal Rating', '')
+current_rating = row.get('Personal Rating', '')
+try:
+    # Try to convert to int, but handle empty strings and other non-numeric values
+    if pd.notna(current_rating) and current_rating != '':
+        current_rating = int(float(current_rating))
+    else:
+        current_rating = ''
+except:
+    current_rating = ''
 
-# Analysis dashboard
+# Create options with empty option first
+rating_options = ['']+[str(i) for i in range(1, 11)]
+selected_index = rating_options.index(str(current_rating)) if str(current_rating) in rating_options else 0
+
+new_rating = st.selectbox(
+    "Your Rating",
+    options=rating_options,
+    index=selected_index,
+    key=f"{key_prefix}_rating"
+)
+
+# Favorite as checkbox
+current_favorite = row.get('Favorite', 'No')
+new_favorite = st.checkbox(
+    "Favorite",
+    value=(current_favorite == 'Yes'),
+    key=f"{key_prefix}_favorite"
+)
+
+# Watch date input
+# Only show if watched or manually expanded
+show_date = new_status == 'Yes' or current_status == 'Yes'
+
+if show_date:
+    current_date = row.get('Watch Date', '')
+    default_date = datetime.now().date()
+    
+    # Try to parse existing date in various formats
+    if current_date and pd.notna(current_date) and current_date != '':
+        try:
+            # Try multiple formats
+            for fmt in ['%m-%d-%Y', '%Y-%m-%d', '%m/%d/%Y']:
+                try:
+                    default_date = datetime.strptime(str(current_date), fmt).date()
+                    break
+                except:
+                    pass
+        except:
+            pass
+    
+    new_date = st.date_input(
+        "Date Watched",
+        default_date,
+        key=f"{key_prefix}_date",
+        format="MM/DD/YYYY"
+    )
+    
+    # Format date as mm-dd-yyyy for storage
+    formatted_date = new_date.strftime('%m-%d-%Y') if new_date else ''
+else:
+    formatted_date = row.get('Watch Date', '')
+
+# Update button
+if st.button("Update", key=f"{key_prefix}_update"):
+    # Get the worksheet
+    try:
+        sheet = spreadsheet.worksheet(selected_show) if 'selected_show' in locals() else None
+        sheet = spreadsheet.worksheet(selected_show)
+        
+        # Get the row number in the sheet (add 2 to account for 0-indexing and header row)
+        sheet_row = idx + 2
+        
+        # Update the cells
+        updates = []
+        
+        # Find column indexes
+        header_row = sheet.row_values(1)
+        watched_col = header_row.index('Watched') + 1 if 'Watched' in header_row else None
+        rating_col = header_row.index('Personal Rating') + 1 if 'Personal Rating' in header_row else None
+        favorite_col = header_row.index('Favorite') + 1 if 'Favorite' in header_row else None
+        date_col = header_row.index('Watch Date') + 1 if 'Watch Date' in header_row else None
+        
+        # Update watched status
+        if watched_col:
+            sheet.update_cell(sheet_row, watched_col, new_status)
+            updates.append(f"Watched={new_status}")
+        
+        # Update personal rating
+        if rating_col:
+            sheet.update_cell(sheet_row, rating_col, new_rating)
+            updates.append(f"Rating={new_rating}")
+        
+        # Update favorite
+        if favorite_col:
+            sheet.update_cell(sheet_row, favorite_col, 'Yes' if new_favorite else 'No')
+            updates.append(f"Favorite={'Yes' if new_favorite else 'No'}")
+        
+        # Update watch date
+        if date_col and show_date:
+            sheet.update_cell(sheet_row, date_col, formatted_date)
+            updates.append(f"Date={formatted_date}")
+        
+        st.success(f"Episode updated! {', '.join(updates)}")
+        
+        # Clear the cache to reflect changes on next load
+        load_all_show_data.clear()
+    
+    except Exception as e:
+        st.error(f"Failed to update: {e}")
+
+def display_analysis(shows, metadata):
+    if not shows:
+        st.warning("No show data available. Please check your Google Sheets connection.")
+        return
 def display_analysis(shows, metadata):
     st.header("📈 Analysis Dashboard")
     
@@ -865,7 +892,8 @@ def main():
     if page == "Overview":
         display_overview(shows, metadata)
     elif page == "Show Details":
-        display_show_details(shows, metadata)
+        if 'display_analysis' in globals():
+            display_analysis(shows, metadata)
     elif page == "Episode Tracker":
         display_episode_tracker(shows, metadata)
     else:
