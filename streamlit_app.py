@@ -215,8 +215,11 @@ def display_overview(shows, metadata):
     # Calculate watching progress
     for show_name, df in shows.items():
         if 'Watched' in df.columns:
-            watched_count = (df['Watched'] == 'Yes').sum()
-            in_progress = (df['Watched'] == 'In Progress').sum()
+# Handle different "Yes" values
+watched_count = sum(1 for watched in df['Watched'] if 
+                   (watched == 'Yes' or 
+                    str(watched).upper() in ['TRUE', 'YES', '1'] or
+                    watched is True))            in_progress = (df['Watched'] == 'In Progress').sum()
             total_count = len(df)
             
             # Calculate progress percentage
@@ -478,13 +481,21 @@ def display_episode_tracker(shows, metadata):
         if selected_seasons:
             filtered_df = filtered_df[filtered_df['Season'].isin(selected_seasons)]
         
-        if watch_status != "All":
-            if watch_status == "Watched":
-                filtered_df = filtered_df[filtered_df['Watched'] == 'Yes']
-            elif watch_status == "Unwatched":
-                filtered_df = filtered_df[filtered_df['Watched'] == 'No']
-            elif watch_status == "In Progress":
-                filtered_df = filtered_df[filtered_df['Watched'] == 'In Progress']
+if watch_status != "All":
+    if watch_status == "Watched":
+        # Create a mask for different "Yes" values
+        watched_mask = (filtered_df['Watched'] == 'Yes') | \
+                       (filtered_df['Watched'].astype(str).str.upper().isin(['TRUE', 'YES', '1'])) | \
+                       (filtered_df['Watched'] == True)
+        filtered_df = filtered_df[watched_mask]
+    elif watch_status == "Unwatched":
+        # Create a mask for different "No" values
+        unwatched_mask = (filtered_df['Watched'] == 'No') | \
+                         (filtered_df['Watched'].astype(str).str.upper().isin(['FALSE', 'NO', '0'])) | \
+                         (filtered_df['Watched'] == False)
+        filtered_df = filtered_df[unwatched_mask]
+    elif watch_status == "In Progress":
+        filtered_df = filtered_df[filtered_df['Watched'] == 'In Progress']
         
         if favorites_only:
             filtered_df = filtered_df[filtered_df['Favorite'] == 'Yes']
@@ -500,8 +511,11 @@ def display_episode_tracker(shows, metadata):
             st.info("No episodes match your filters.")
         else:
             # Progress metrics
-            watched_count = (filtered_df['Watched'] == 'Yes').sum()
-            in_progress = (filtered_df['Watched'] == 'In Progress').sum()
+# Handle different "Yes" values
+watched_count = sum(1 for watched in filtered_df['Watched'] if 
+                   (watched == 'Yes' or 
+                    str(watched).upper() in ['TRUE', 'YES', '1'] or
+                    watched is True))            in_progress = (filtered_df['Watched'] == 'In Progress').sum()
             total_count = len(filtered_df)
             
             progress_col1, progress_col2, progress_col3 = st.columns(3)
@@ -542,13 +556,19 @@ def display_episode_tracker(shows, metadata):
                             st.write(f"**Runtime:** {row['Runtime']}")
                     
                     with action_col:
-                        # Watched as checkbox
-                        current_status = row.get('Watched', 'No')
-                        new_status = "Yes" if st.checkbox(
-                            "Watched",
-                            value=(current_status == 'Yes'),
-                            key=f"{key_prefix}_watched"
-                        ) else "No"
+    # Watched as checkbox
+    current_status = row.get('Watched', 'No')
+    # Make sure we handle TRUE values correctly
+    if isinstance(current_status, bool):
+        current_status = "Yes" if current_status else "No"
+    elif str(current_status).upper() in ['TRUE', 'YES', '1']:
+        current_status = "Yes"
+    
+    new_status = "Yes" if st.checkbox(
+        "Watched",
+        value=(current_status == 'Yes'),
+        key=f"{key_prefix}_watched"
+    ) else "No"
                         
                         # Personal Rating as dropdown
                         current_rating = row.get('Personal Rating', '')
