@@ -11,7 +11,6 @@ import os
 from datetime import datetime
 from google.oauth2 import service_account
 
-# Configuration and setup - MUST BE THE FIRST STREAMLIT COMMAND
 st.set_page_config(
     page_title="TV Show Dashboard",
     page_icon="📺",
@@ -19,12 +18,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Debug information about credentials
 st.write("Checking for credentials...")
 if hasattr(st, 'secrets'):
     if 'gcp_service_account' in st.secrets:
         st.success("Found credentials in Streamlit secrets!")
-        # Display email to verify it's the correct account
         email = st.secrets["gcp_service_account"].get("client_email", "Unknown")
         st.write(f"Service account email: {email}")
     else:
@@ -33,29 +30,24 @@ if hasattr(st, 'secrets'):
 else:
     st.warning("No Streamlit secrets configured")
 
-# Get credentials from environment, secrets, or file
+
 def get_credentials():
-    # Option 1: Check for Streamlit secrets (preferred)
     if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
         return st.secrets["gcp_service_account"]
-    
-    # Option 2: Check for environment variable
     elif os.environ.get('GOOGLE_CREDENTIALS'):
         try:
             return json.loads(os.environ.get('GOOGLE_CREDENTIALS'))
         except json.JSONDecodeError:
             st.error("Invalid JSON in GOOGLE_CREDENTIALS environment variable")
-    
-    # Option 3: Check for local file
     else:
         try:
             with open('credentials.json') as f:
                 return json.load(f)
         except FileNotFoundError:
-            st.error("No Google credentials found. Please add credentials to Streamlit secrets, set GOOGLE_CREDENTIALS environment variable, or provide a credentials.json file.")
+            st.error("No Google credentials found.")
             return None
 
-# Connect to Google Sheets
+
 @st.cache_resource
 def connect_sheets():
     try:
@@ -63,127 +55,82 @@ def connect_sheets():
         if not creds_dict:
             st.error("Failed to get credentials")
             return None
-            
+
         credentials = service_account.Credentials.from_service_account_info(
             creds_dict,
             scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         )
         client = gspread.authorize(credentials)
-        
+
         try:
-            # Try to list all spreadsheets to verify connection
             all_sheets = [sheet.title for sheet in client.openall()]
             st.write(f"Connected to Google Sheets. Available spreadsheets: {all_sheets}")
         except Exception as e:
             st.warning(f"Connected but couldn't list spreadsheets: {e}")
-        
-        # Try to open the specific spreadsheet
+
         return client.open("My Favorite TV Shows")
     except Exception as e:
         st.error(f"Failed to connect to Google Sheets: {e}")
         return None
 
-# Load show data with caching and error handling
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+
+@st.cache_data(ttl=300)
 def load_all_show_data():
     spreadsheet = connect_sheets()
     if not spreadsheet:
         return {}, {}
-        
+
     all_shows = {}
     show_metadata = {}
-    
+
     with st.spinner("Loading shows from Google Sheets..."):
-        # Get all worksheets (each sheet is a show)
         for sheet in spreadsheet.worksheets():
             try:
-                # Skip empty sheets or sheets without proper headers
                 header_row = sheet.row_values(1)
                 if header_row and 'Show Name' in header_row:
                     data = sheet.get_all_records()
                     if data:
                         df = pd.DataFrame(data)
-                        
-                        # Extract metadata from the first row
                         first_row = df.iloc[0] if not df.empty else None
-                        
+
                         if first_row is not None and 'Show Name' in df.columns:
                             show_name = first_row['Show Name']
-                            # Store metadata for this show
                             show_metadata[sheet.title] = {
                                 'title': show_name,
                                 'total_episodes': len(df),
                                 'seasons': df['Season'].nunique() if 'Season' in df.columns else 0,
                             }
-                            
-                            # Safely calculate average rating if available
+
                             if 'Rating' in df.columns:
-                                # Convert to numeric, coercing errors to NaN
                                 numeric_ratings = pd.to_numeric(df['Rating'], errors='coerce')
-                                if not numeric_ratings.isna().all():
-                                    show_metadata[sheet.title]['average_rating'] = numeric_ratings.mean()
-                                else:
-                                    show_metadata[sheet.title]['average_rating'] = None
+                                show_metadata[sheet.title]['average_rating'] = numeric_ratings.mean() if not numeric_ratings.isna().all() else None
                             else:
                                 show_metadata[sheet.title]['average_rating'] = None
-                                
-                            # Safely get longest episode if available
+
                             if 'Runtime' in df.columns:
-                                # Try to extract numeric values from runtime strings
                                 try:
-                                    runtime_values = df['Runtime'].str.extract('(\d+)').astype(float, errors='ignore')
-                                    if not runtime_values.empty and not runtime_values.isna().all():
-                                        show_metadata[sheet.title]['longest_episode'] = runtime_values.max()
-                                    else:
-                                        show_metadata[sheet.title]['longest_episode'] = None
+                                    runtime_values = df['Runtime'].str.extract('(\\d+)').astype(float, errors='ignore')
+                                    show_metadata[sheet.title]['longest_episode'] = runtime_values.max().max() if not runtime_values.isna().all().all() else None
                                 except:
                                     show_metadata[sheet.title]['longest_episode'] = None
-                            else:
-                                show_metadata[sheet.title]['longest_episode'] = None
-                        
-                        # Check for tracking columns, add if not present
-                        if 'Watched' not in df.columns:
-                            df['Watched'] = 'No'
-                        if 'Personal Rating' not in df.columns:
-                            df['Personal Rating'] = None
-                        if 'Favorite' not in df.columns:
-                            df['Favorite'] = 'No'
-                        if 'Watch Date' not in df.columns:
-                            df['Watch Date'] = None
-                        
+
+                        for col in ['Watched', 'Personal Rating', 'Favorite', 'Watch Date']:
+                            if col not in df.columns:
+                                df[col] = 'No' if col in ['Watched', 'Favorite'] else None
+
                         all_shows[sheet.title] = df
             except Exception as e:
                 st.warning(f"Couldn't load sheet {sheet.title}: {e}")
-                continue
-    
+
     return all_shows, show_metadata
 
-# Update a specific cell in Google Sheets
-def update_sheet_cell(sheet_name, row, col, value):
-    try:
-        spreadsheet = connect_sheets()
-        if not spreadsheet:
-            return False
-            
-        sheet = spreadsheet.worksheet(sheet_name)
-        # Convert to A1 notation
-        cell = f"{chr(64 + col)}{row}"
-        sheet.update(cell, value)
-        return True
-    except Exception as e:
-        st.error(f"Failed to update cell: {e}")
-        return False
 
-# Safely convert to numeric, handling empty strings and other non-numeric values
-def safe_numeric_mean(series):
-    if series.empty:
-        return None
-    # Convert to numeric, coercing errors to NaN
-    numeric_values = pd.to_numeric(series, errors='coerce')
-    # Return mean if we have valid numeric values, otherwise None
-    if numeric_values.notna().any():
-        return numeric_values.mean()
-    return None
+# Add your entire dashboard logic here, including:
+# - display_overview(shows, metadata)
+# - display_show_details(shows, metadata)
+# - display_episode_tracker(shows, metadata)
+# - display_analysis(shows, metadata)
+# - main() that sets up sidebar navigation and renders the chosen page
 
 # DASHBOARD COMPONENTS
 
