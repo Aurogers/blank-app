@@ -114,9 +114,32 @@ def load_all_show_data():
                                 'title': show_name,
                                 'total_episodes': len(df),
                                 'seasons': df['Season'].nunique() if 'Season' in df.columns else 0,
-                                'average_rating': df['Rating'].mean() if 'Rating' in df.columns and df['Rating'].notna().any() else None,
-                                'longest_episode': df['Runtime'].max() if 'Runtime' in df.columns and df['Runtime'].notna().any() else None
                             }
+                            
+                            # Safely calculate average rating if available
+                            if 'Rating' in df.columns:
+                                # Convert to numeric, coercing errors to NaN
+                                numeric_ratings = pd.to_numeric(df['Rating'], errors='coerce')
+                                if not numeric_ratings.isna().all():
+                                    show_metadata[sheet.title]['average_rating'] = numeric_ratings.mean()
+                                else:
+                                    show_metadata[sheet.title]['average_rating'] = None
+                            else:
+                                show_metadata[sheet.title]['average_rating'] = None
+                                
+                            # Safely get longest episode if available
+                            if 'Runtime' in df.columns:
+                                # Try to extract numeric values from runtime strings
+                                try:
+                                    runtime_values = df['Runtime'].str.extract('(\d+)').astype(float, errors='ignore')
+                                    if not runtime_values.empty and not runtime_values.isna().all():
+                                        show_metadata[sheet.title]['longest_episode'] = runtime_values.max()
+                                    else:
+                                        show_metadata[sheet.title]['longest_episode'] = None
+                                except:
+                                    show_metadata[sheet.title]['longest_episode'] = None
+                            else:
+                                show_metadata[sheet.title]['longest_episode'] = None
                         
                         # Check for tracking columns, add if not present
                         if 'Watched' not in df.columns:
@@ -150,6 +173,17 @@ def update_sheet_cell(sheet_name, row, col, value):
     except Exception as e:
         st.error(f"Failed to update cell: {e}")
         return False
+
+# Safely convert to numeric, handling empty strings and other non-numeric values
+def safe_numeric_mean(series):
+    if series.empty:
+        return None
+    # Convert to numeric, coercing errors to NaN
+    numeric_values = pd.to_numeric(series, errors='coerce')
+    # Return mean if we have valid numeric values, otherwise None
+    if numeric_values.notna().any():
+        return numeric_values.mean()
+    return None
 
 # DASHBOARD COMPONENTS
 
@@ -196,18 +230,22 @@ def display_overview(shows, metadata):
                 st.progress(progress_pct / 100)
                 
                 # Show ratings if available
-                if 'Rating' in df.columns and df['Rating'].notna().any():
-                    avg_rating = df['Rating'].mean()
-                    st.write(f"Average Rating: {avg_rating:.1f}/10")
+                if 'Rating' in df.columns:
+                    # Convert to numeric, handling non-numeric values
+                    numeric_ratings = pd.to_numeric(df['Rating'], errors='coerce')
+                    if numeric_ratings.notna().any():
+                        avg_rating = numeric_ratings.mean()
+                        st.write(f"Average Rating: {avg_rating:.1f}/10")
                 
                 # Quick stat columns
                 stat_col1, stat_col2 = st.columns(2)
                 with stat_col1:
                     st.write(f"Seasons: {df['Season'].nunique() if 'Season' in df.columns else 'N/A'}")
-                    if 'Personal Rating' in df.columns and df['Personal Rating'].notna().any():
-                        personal_ratings = [float(r) for r in df['Personal Rating'] if r and pd.notna(r) and str(r).strip()]
-                        if personal_ratings:
-                            avg_personal = sum(personal_ratings) / len(personal_ratings)
+                    if 'Personal Rating' in df.columns:
+                        # Convert to numeric, handling non-numeric values
+                        numeric_personal = pd.to_numeric(df['Personal Rating'], errors='coerce')
+                        if numeric_personal.notna().any():
+                            avg_personal = numeric_personal.mean()
                             st.write(f"Your Average Rating: {avg_personal:.1f}/10")
                 with stat_col2:
                     st.write(f"Episodes Remaining: {total_count - watched_count}")
@@ -219,12 +257,15 @@ def display_overview(shows, metadata):
     # Create a DataFrame with average ratings by show
     ratings_data = []
     for show_name, df in shows.items():
-        if 'Rating' in df.columns and df['Rating'].notna().any():
-            avg_rating = df['Rating'].mean()
-            ratings_data.append({
-                'Show': show_name,
-                'Average Rating': avg_rating
-            })
+        if 'Rating' in df.columns:
+            # Convert to numeric, handling non-numeric values
+            numeric_ratings = pd.to_numeric(df['Rating'], errors='coerce')
+            if numeric_ratings.notna().any():
+                avg_rating = numeric_ratings.mean()
+                ratings_data.append({
+                    'Show': show_name,
+                    'Average Rating': avg_rating
+                })
     
     if ratings_data:
         ratings_df = pd.DataFrame(ratings_data)
@@ -269,8 +310,14 @@ def display_show_details(shows, metadata):
         with col2:
             st.metric("Seasons", df['Season'].nunique() if 'Season' in df.columns else 0)
         with col3:
-            if 'Rating' in df.columns and df['Rating'].notna().any():
-                st.metric("Average Rating", f"{df['Rating'].mean():.1f}")
+            if 'Rating' in df.columns:
+                # Convert to numeric, handling non-numeric values
+                numeric_ratings = pd.to_numeric(df['Rating'], errors='coerce')
+                if numeric_ratings.notna().any():
+                    avg_rating = numeric_ratings.mean()
+                    st.metric("Average Rating", f"{avg_rating:.1f}")
+                else:
+                    st.metric("Average Rating", "N/A")
             else:
                 st.metric("Average Rating", "N/A")
         
@@ -278,26 +325,32 @@ def display_show_details(shows, metadata):
         tab1, tab2, tab3 = st.tabs(["Season Ratings", "Episode List", "Runtime Analysis"])
         
         with tab1:
-            if 'Rating' in df.columns and 'Season' in df.columns and df['Rating'].notna().any():
-                # Calculate average rating by season
-                season_ratings = df.groupby('Season')['Rating'].mean().reset_index()
+            if 'Rating' in df.columns and 'Season' in df.columns:
+                # Convert to numeric, handling non-numeric values
+                df['Numeric_Rating'] = pd.to_numeric(df['Rating'], errors='coerce')
                 
-                # Create visualization
-                fig = px.line(
-                    season_ratings, 
-                    x='Season', 
-                    y='Rating',
-                    markers=True,
-                    title=f"Average Rating by Season for {selected_show}"
-                )
-                fig.update_layout(xaxis_title="Season", yaxis_title="Rating")
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Top episodes
-                st.subheader("Top Rated Episodes")
-                top_episodes = df.sort_values('Rating', ascending=False).head(5)
-                for _, row in top_episodes.iterrows():
-                    st.write(f"S{row['Season']}E{row['Episode']} - {row['Episode Title']}: {row['Rating']}/10")
+                if df['Numeric_Rating'].notna().any():
+                    # Calculate average rating by season
+                    season_ratings = df.groupby('Season')['Numeric_Rating'].mean().reset_index()
+                    
+                    # Create visualization
+                    fig = px.line(
+                        season_ratings, 
+                        x='Season', 
+                        y='Numeric_Rating',
+                        markers=True,
+                        title=f"Average Rating by Season for {selected_show}"
+                    )
+                    fig.update_layout(xaxis_title="Season", yaxis_title="Rating")
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Top episodes
+                    st.subheader("Top Rated Episodes")
+                    top_episodes = df.sort_values('Numeric_Rating', ascending=False).head(5)
+                    for _, row in top_episodes.iterrows():
+                        st.write(f"S{row['Season']}E{row['Episode']} - {row['Episode Title']}: {row['Rating']}/10")
+                else:
+                    st.info("No valid rating data available for this show.")
             else:
                 st.info("No rating data available for this show.")
         
@@ -319,50 +372,50 @@ def display_show_details(shows, metadata):
             st.dataframe(sorted_df[cols_to_display], use_container_width=True)
         
         with tab3:
-            if 'Runtime' in df.columns and df['Runtime'].notna().any():
+            if 'Runtime' in df.columns:
                 # Clean runtime data (extract numbers if strings like "30 min")
-                if df['Runtime'].dtype == 'object':
-                    try:
-                        df['Runtime_Minutes'] = df['Runtime'].str.extract('(\d+)').astype(float)
-                    except Exception as e:
-                        st.warning(f"Could not parse runtime data: {e}")
-                        df['Runtime_Minutes'] = 0
-                else:
-                    df['Runtime_Minutes'] = df['Runtime']
-                
-                # Runtime analysis by season
-                if 'Season' in df.columns:
-                    runtime_by_season = df.groupby('Season')['Runtime_Minutes'].mean().reset_index()
+                try:
+                    df['Runtime_Minutes'] = df['Runtime'].str.extract('(\d+)').astype(float, errors='coerce')
                     
-                    fig = px.bar(
-                        runtime_by_season,
-                        x='Season',
-                        y='Runtime_Minutes',
-                        title=f"Average Episode Runtime by Season for {selected_show}",
-                        labels={"Runtime_Minutes": "Runtime (minutes)"}
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Runtime trend over episodes
-                    if 'Episode' in df.columns:
-                        # Sort by season and episode
-                        sorted_runtime = df.sort_values(['Season', 'Episode'])
-                        
-                        # Create a continuous episode number for x-axis
-                        sorted_runtime['Episode_Number'] = range(1, len(sorted_runtime) + 1)
-                        
-                        fig = px.scatter(
-                            sorted_runtime,
-                            x='Episode_Number',
-                            y='Runtime_Minutes',
-                            color='Season',
-                            hover_data=['Season', 'Episode', 'Episode Title'],
-                            title=f"Episode Runtime Trend for {selected_show}",
-                            labels={"Runtime_Minutes": "Runtime (minutes)", "Episode_Number": "Episode Number (Overall)"}
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("Season data not available for runtime analysis.")
+                    if df['Runtime_Minutes'].notna().any():
+                        # Runtime analysis by season
+                        if 'Season' in df.columns:
+                            runtime_by_season = df.groupby('Season')['Runtime_Minutes'].mean().reset_index()
+                            
+                            fig = px.bar(
+                                runtime_by_season,
+                                x='Season',
+                                y='Runtime_Minutes',
+                                title=f"Average Episode Runtime by Season for {selected_show}",
+                                labels={"Runtime_Minutes": "Runtime (minutes)"}
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                            
+                            # Runtime trend over episodes
+                            if 'Episode' in df.columns:
+                                # Sort by season and episode
+                                sorted_runtime = df.sort_values(['Season', 'Episode'])
+                                
+                                # Create a continuous episode number for x-axis
+                                sorted_runtime['Episode_Number'] = range(1, len(sorted_runtime) + 1)
+                                
+                                fig = px.scatter(
+                                    sorted_runtime,
+                                    x='Episode_Number',
+                                    y='Runtime_Minutes',
+                                    color='Season',
+                                    hover_data=['Season', 'Episode', 'Episode Title'],
+                                    title=f"Episode Runtime Trend for {selected_show}",
+                                    labels={"Runtime_Minutes": "Runtime (minutes)", "Episode_Number": "Episode Number (Overall)"}
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.info("Season data not available for runtime analysis.")
+                    else:
+                        st.info("Could not extract valid runtime data for analysis.")
+                except Exception as e:
+                    st.warning(f"Could not parse runtime data: {e}")
+                    st.info("No valid runtime data available for this show.")
             else:
                 st.info("No runtime data available for this show.")
 
@@ -500,7 +553,11 @@ def display_episode_tracker(shows, metadata):
                         # Personal Rating as dropdown
                         current_rating = row.get('Personal Rating', '')
                         try:
-                            current_rating = int(float(current_rating)) if current_rating and not pd.isna(current_rating) else ''
+                            # Try to convert to int, but handle empty strings and other non-numeric values
+                            if pd.notna(current_rating) and current_rating != '':
+                                current_rating = int(float(current_rating))
+                            else:
+                                current_rating = ''
                         except:
                             current_rating = ''
                         
@@ -528,14 +585,14 @@ def display_episode_tracker(shows, metadata):
                         show_date = new_status == 'Yes' or current_status == 'Yes'
                         
                         if show_date:
-                            current_date = row.get('Watch Date')
+                            current_date = row.get('Watch Date', '')
                             default_date = datetime.now().date()
                             
                             # Try to parse existing date in various formats
-                            if current_date and pd.notna(current_date):
+                            if current_date and pd.notna(current_date) and current_date != '':
                                 try:
                                     # Try multiple formats
-                                    for fmt in ['%Y-%m-%d', '%m-%d-%Y', '%m/%d/%Y']:
+                                    for fmt in ['%m-%d-%Y', '%Y-%m-%d', '%m/%d/%Y']:
                                         try:
                                             default_date = datetime.strptime(str(current_date), fmt).date()
                                             break
@@ -621,13 +678,16 @@ def display_analysis(shows, metadata):
         # Create a DataFrame with average ratings by show
         ratings_data = []
         for show_name, df in shows.items():
-            if 'Rating' in df.columns and df['Rating'].notna().any():
-                avg_rating = df['Rating'].mean()
-                ratings_data.append({
-                    'Show': show_name,
-                    'Average Rating': avg_rating,
-                    'Episode Count': len(df)
-                })
+            if 'Rating' in df.columns:
+                # Convert to numeric, handling non-numeric values
+                numeric_ratings = pd.to_numeric(df['Rating'], errors='coerce')
+                if numeric_ratings.notna().any():
+                    avg_rating = numeric_ratings.mean()
+                    ratings_data.append({
+                        'Show': show_name,
+                        'Average Rating': avg_rating,
+                        'Episode Count': len(df)
+                    })
         
         if ratings_data:
             ratings_df = pd.DataFrame(ratings_data)
@@ -651,11 +711,15 @@ def display_analysis(shows, metadata):
             # Prepare data for season comparison
             season_data = []
             for show_name, df in shows.items():
-                if 'Rating' in df.columns and 'Season' in df.columns and df['Rating'].notna().any():
-                    # Group by season and calculate average ratings
-                    season_ratings = df.groupby('Season')['Rating'].mean().reset_index()
-                    season_ratings['Show'] = show_name
-                    season_data.append(season_ratings)
+                if 'Rating' in df.columns and 'Season' in df.columns:
+                    # Convert to numeric, handling non-numeric values
+                    df['Numeric_Rating'] = pd.to_numeric(df['Rating'], errors='coerce')
+                    
+                    if df['Numeric_Rating'].notna().any():
+                        # Group by season and calculate average ratings
+                        season_ratings = df.groupby('Season')['Numeric_Rating'].mean().reset_index()
+                        season_ratings['Show'] = show_name
+                        season_data.append(season_ratings)
             
             if season_data:
                 # Combine all show data
@@ -665,7 +729,7 @@ def display_analysis(shows, metadata):
                 fig = px.line(
                     all_season_data,
                     x='Season',
-                    y='Rating',
+                    y='Numeric_Rating',
                     color='Show',
                     markers=True,
                     title='Average Ratings by Season Across Shows'
@@ -704,7 +768,7 @@ def display_analysis(shows, metadata):
         # Check if we have any watch date data
         has_watch_dates = False
         for show_name, df in shows.items():
-            if 'Watch Date' in df.columns and df['Watch Date'].notna().any():
+            if 'Watch Date' in df.columns and df['Watch Date'].notna().any() and (df['Watch Date'] != '').any():
                 has_watch_dates = True
                 break
         
@@ -712,20 +776,21 @@ def display_analysis(shows, metadata):
             # Collect all watch dates across shows
             all_watch_dates = []
             for show_name, df in shows.items():
-                if 'Watch Date' in df.columns and df['Watch Date'].notna().any():
+                if 'Watch Date' in df.columns:
                     # Try to parse dates
                     for date_str in df['Watch Date'].dropna():
-                        try:
-                            # Try different date formats
-                            for fmt in ['%m-%d-%Y', '%Y-%m-%d', '%m/%d/%Y']:
-                                try:
-                                    date = datetime.strptime(str(date_str), fmt)
-                                    all_watch_dates.append(date)
-                                    break
-                                except:
-                                    pass
-                        except:
-                            pass
+                        if date_str and str(date_str).strip():  # Check for empty strings
+                            try:
+                                # Try different date formats
+                                for fmt in ['%m-%d-%Y', '%Y-%m-%d', '%m/%d/%Y']:
+                                    try:
+                                        date = datetime.strptime(str(date_str), fmt)
+                                        all_watch_dates.append(date)
+                                        break
+                                    except:
+                                        pass
+                            except:
+                                pass
             
             if all_watch_dates:
                 # Convert to a dataframe for analysis
