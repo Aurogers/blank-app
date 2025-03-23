@@ -649,3 +649,32 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
+
+# At the top after imports
+st.write("Looking for Google credentials...")
+
+# In the get_credentials function
+def get_credentials():
+    # Option 1: Check for environment variable
+    if os.environ.get('GOOGLE_CREDENTIALS'):
+        st.success("Found credentials in environment variable")
+        try:
+            return json.loads(os.environ.get('GOOGLE_CREDENTIALS'))
+        except json.JSONDecodeError:
+            st.error("Invalid JSON in GOOGLE_CREDENTIALS environment variable")
+    
+    # Option 2: Check for Streamlit secrets
+    elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+        st.success("Found credentials in Streamlit secrets")
+        return st.secrets["gcp_service_account"]
+    
+    # Option 3: Check for local file
+    else:
+        try:
+            with open('credentials.json') as f:
+                st.success("Found credentials in credentials.json file")
+                return json.load(f)
+        except FileNotFoundError:
+            st.error("No Google credentials found in any location")
+            st.stop()
