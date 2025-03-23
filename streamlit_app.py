@@ -11,23 +11,7 @@ import os
 from datetime import datetime
 from google.oauth2 import service_account
 
-# At the beginning of your app, add:
-st.write("Debug: Checking secrets...")
-if hasattr(st, 'secrets'):
-    st.write(f"Secrets available: {list(st.secrets.keys())}")
-    if 'gcp_service_account' in st.secrets:
-        st.write("Found gcp_service_account section")
-        # Print a safe subset of fields to verify
-        service_account = st.secrets['gcp_service_account']
-        st.write(f"Service account email: {service_account.get('client_email', 'Not found')}")
-        st.write(f"Project ID: {service_account.get('project_id', 'Not found')}")
-    else:
-        st.write("Missing gcp_service_account section in secrets")
-else:
-    st.write("No secrets available at all")
-    
-
-# Configuration and setup
+# Configuration and setup - MUST BE THE FIRST STREAMLIT COMMAND
 st.set_page_config(
     page_title="TV Show Dashboard",
     page_icon="📺",
@@ -35,51 +19,66 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Debug line to check credentials loading
-st.write("Looking for Google credentials...")
+# Debug information about credentials
+st.write("Checking for credentials...")
+if hasattr(st, 'secrets'):
+    if 'gcp_service_account' in st.secrets:
+        st.success("Found credentials in Streamlit secrets!")
+        # Display email to verify it's the correct account
+        email = st.secrets["gcp_service_account"].get("client_email", "Unknown")
+        st.write(f"Service account email: {email}")
+    else:
+        st.error("No 'gcp_service_account' section found in Streamlit secrets")
+        st.write(f"Available secrets sections: {list(st.secrets.keys())}")
+else:
+    st.warning("No Streamlit secrets configured")
 
 # Get credentials from environment, secrets, or file
 def get_credentials():
-    # Option 1: Check for environment variable
-    if os.environ.get('GOOGLE_CREDENTIALS'):
-        st.success("Found credentials in environment variable")
+    # Option 1: Check for Streamlit secrets (preferred)
+    if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+        return st.secrets["gcp_service_account"]
+    
+    # Option 2: Check for environment variable
+    elif os.environ.get('GOOGLE_CREDENTIALS'):
         try:
             return json.loads(os.environ.get('GOOGLE_CREDENTIALS'))
         except json.JSONDecodeError:
             st.error("Invalid JSON in GOOGLE_CREDENTIALS environment variable")
     
-    # Option 2: Check for Streamlit secrets
-    elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
-        st.success("Found credentials in Streamlit secrets")
-        return st.secrets["gcp_service_account"]
-    
     # Option 3: Check for local file
     else:
         try:
             with open('credentials.json') as f:
-                st.success("Found credentials in credentials.json file")
                 return json.load(f)
         except FileNotFoundError:
-            st.error("No Google credentials found. Please set GOOGLE_CREDENTIALS environment variable, add to Streamlit secrets, or provide a credentials.json file.")
-            st.stop()
+            st.error("No Google credentials found. Please add credentials to Streamlit secrets, set GOOGLE_CREDENTIALS environment variable, or provide a credentials.json file.")
+            return None
 
 # Connect to Google Sheets
 @st.cache_resource
 def connect_sheets():
     try:
-        # Check for secrets in Streamlit
-        if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
-            st.success("Using Streamlit secrets")
-            creds_dict = st.secrets["gcp_service_account"]
-            credentials = service_account.Credentials.from_service_account_info(
-                creds_dict,
-                scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-            )
-            client = gspread.authorize(credentials)
-            return client.open("My Favorite TV Shows")
-        else:
-            st.error("No credentials found. Please add service account credentials to Streamlit secrets.")
+        creds_dict = get_credentials()
+        if not creds_dict:
+            st.error("Failed to get credentials")
             return None
+            
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_dict,
+            scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        )
+        client = gspread.authorize(credentials)
+        
+        try:
+            # Try to list all spreadsheets to verify connection
+            all_sheets = [sheet.title for sheet in client.openall()]
+            st.write(f"Connected to Google Sheets. Available spreadsheets: {all_sheets}")
+        except Exception as e:
+            st.warning(f"Connected but couldn't list spreadsheets: {e}")
+        
+        # Try to open the specific spreadsheet
+        return client.open("My Favorite TV Shows")
     except Exception as e:
         st.error(f"Failed to connect to Google Sheets: {e}")
         return None
@@ -721,6 +720,7 @@ def main():
     with st.sidebar.expander("About"):
         st.write("This dashboard visualizes data from your TV show collection in Google Sheets.")
         st.write("Built with Streamlit and Plotly.")
+        st.write("Data fetched from TV Maze API and stored in Google Sheets.")
 
 # Run the app
 if __name__ == "__main__":
