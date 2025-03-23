@@ -205,7 +205,10 @@ def display_overview(shows, metadata):
                 with stat_col1:
                     st.write(f"Seasons: {df['Season'].nunique() if 'Season' in df.columns else 'N/A'}")
                     if 'Personal Rating' in df.columns and df['Personal Rating'].notna().any():
-                        st.write(f"Your Average Rating: {df['Personal Rating'].mean():.1f}/10")
+                        personal_ratings = [float(r) for r in df['Personal Rating'] if r and pd.notna(r) and str(r).strip()]
+                        if personal_ratings:
+                            avg_personal = sum(personal_ratings) / len(personal_ratings)
+                            st.write(f"Your Average Rating: {avg_personal:.1f}/10")
                 with stat_col2:
                     st.write(f"Episodes Remaining: {total_count - watched_count}")
                     st.write(f"Completion: {progress_pct:.1f}%")
@@ -301,7 +304,7 @@ def display_show_details(shows, metadata):
         with tab2:
             # Create a dataframe view with season, episode, title, and rating
             display_cols = ['Season', 'Episode', 'Episode Title', 'Rating', 'Release Date']
-            tracking_cols = ['Watched', 'Personal Rating', 'Favorite']
+            tracking_cols = ['Watched', 'Personal Rating', 'Favorite', 'Watch Date']
             
             # Combine the columns that exist in the dataframe
             cols_to_display = [col for col in display_cols + tracking_cols if col in df.columns]
@@ -385,6 +388,8 @@ def display_episode_tracker(shows, metadata):
             df['Personal Rating'] = None
         if 'Favorite' not in df.columns:
             df['Favorite'] = 'No'
+        if 'Watch Date' not in df.columns:
+            df['Watch Date'] = None
         
         # Filter controls
         st.subheader("Filter Episodes")
@@ -484,32 +489,33 @@ def display_episode_tracker(shows, metadata):
                             st.write(f"**Runtime:** {row['Runtime']}")
                     
                     with action_col:
-                        # Watch status dropdown
-                        watch_options = ['No', 'Yes', 'In Progress']
+                        # Watched as checkbox
                         current_status = row.get('Watched', 'No')
-                        new_status = st.selectbox(
+                        new_status = "Yes" if st.checkbox(
                             "Watched",
-                            options=watch_options,
-                            index=watch_options.index(current_status) if current_status in watch_options else 0,
+                            value=(current_status == 'Yes'),
                             key=f"{key_prefix}_watched"
-                        )
+                        ) else "No"
                         
-                        # Personal rating slider
-                        current_rating = row.get('Personal Rating')
-                        if pd.isna(current_rating):
-                            current_rating = 0
+                        # Personal Rating as dropdown
+                        current_rating = row.get('Personal Rating', '')
                         try:
-                            current_rating = int(float(current_rating))
+                            current_rating = int(float(current_rating)) if current_rating and not pd.isna(current_rating) else ''
                         except:
-                            current_rating = 0
+                            current_rating = ''
                         
-                        new_rating = st.slider(
+                        # Create options with empty option first
+                        rating_options = ['']+[str(i) for i in range(1, 11)]
+                        selected_index = rating_options.index(str(current_rating)) if str(current_rating) in rating_options else 0
+                        
+                        new_rating = st.selectbox(
                             "Your Rating",
-                            0, 10, current_rating,
+                            options=rating_options,
+                            index=selected_index,
                             key=f"{key_prefix}_rating"
                         )
                         
-                        # Favorite checkbox
+                        # Favorite as checkbox
                         current_favorite = row.get('Favorite', 'No')
                         new_favorite = st.checkbox(
                             "Favorite",
@@ -517,24 +523,38 @@ def display_episode_tracker(shows, metadata):
                             key=f"{key_prefix}_favorite"
                         )
                         
-                        # Watch date picker if watched
-                        if new_status == 'Yes':
+                        # Watch date input
+                        # Only show if watched or manually expanded
+                        show_date = new_status == 'Yes' or current_status == 'Yes'
+                        
+                        if show_date:
                             current_date = row.get('Watch Date')
-                            try:
-                                if pd.notna(current_date) and current_date:
-                                    current_date = datetime.strptime(current_date, '%Y-%m-%d').date()
-                                else:
-                                    current_date = datetime.now().date()
-                            except:
-                                current_date = datetime.now().date()
+                            default_date = datetime.now().date()
+                            
+                            # Try to parse existing date in various formats
+                            if current_date and pd.notna(current_date):
+                                try:
+                                    # Try multiple formats
+                                    for fmt in ['%Y-%m-%d', '%m-%d-%Y', '%m/%d/%Y']:
+                                        try:
+                                            default_date = datetime.strptime(str(current_date), fmt).date()
+                                            break
+                                        except:
+                                            pass
+                                except:
+                                    pass
                             
                             new_date = st.date_input(
                                 "Date Watched",
-                                current_date,
-                                key=f"{key_prefix}_date"
+                                default_date,
+                                key=f"{key_prefix}_date",
+                                format="MM/DD/YYYY"
                             )
+                            
+                            # Format date as mm-dd-yyyy for storage
+                            formatted_date = new_date.strftime('%m-%d-%Y') if new_date else ''
                         else:
-                            new_date = None
+                            formatted_date = row.get('Watch Date', '')
                         
                         # Update button
                         if st.button("Update", key=f"{key_prefix}_update"):
@@ -572,11 +592,14 @@ def display_episode_tracker(shows, metadata):
                                     updates.append(f"Favorite={'Yes' if new_favorite else 'No'}")
                                 
                                 # Update watch date
-                                if date_col and new_date:
-                                    sheet.update_cell(sheet_row, date_col, new_date.strftime('%Y-%m-%d'))
-                                    updates.append(f"Date={new_date.strftime('%Y-%m-%d')}")
+                                if date_col and show_date:
+                                    sheet.update_cell(sheet_row, date_col, formatted_date)
+                                    updates.append(f"Date={formatted_date}")
                                 
                                 st.success(f"Episode updated! {', '.join(updates)}")
+                                
+                                # Clear the cache to reflect changes on next load
+                                load_all_show_data.clear()
                             
                             except Exception as e:
                                 st.error(f"Failed to update: {e}")
@@ -677,21 +700,121 @@ def display_analysis(shows, metadata):
     
     with tab3:
         st.subheader("Viewing Patterns")
-        st.info("This analysis would use your watch dates to show when you watch TV. Add viewing dates to your episodes to enable this analysis.")
         
-        # Placeholder for viewing pattern analysis
-        # Create some sample data for days of week viewing
-        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        views = [5, 3, 2, 4, 8, 12, 10]
+        # Check if we have any watch date data
+        has_watch_dates = False
+        for show_name, df in shows.items():
+            if 'Watch Date' in df.columns and df['Watch Date'].notna().any():
+                has_watch_dates = True
+                break
         
-        # Create a bar chart
-        fig = px.bar(
-            x=days, 
-            y=views,
-            title='Most Popular Viewing Days (Sample Data)',
-            labels={'x': 'Day of Week', 'y': 'Episodes Watched'}
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        if has_watch_dates:
+            # Collect all watch dates across shows
+            all_watch_dates = []
+            for show_name, df in shows.items():
+                if 'Watch Date' in df.columns and df['Watch Date'].notna().any():
+                    # Try to parse dates
+                    for date_str in df['Watch Date'].dropna():
+                        try:
+                            # Try different date formats
+                            for fmt in ['%m-%d-%Y', '%Y-%m-%d', '%m/%d/%Y']:
+                                try:
+                                    date = datetime.strptime(str(date_str), fmt)
+                                    all_watch_dates.append(date)
+                                    break
+                                except:
+                                    pass
+                        except:
+                            pass
+            
+            if all_watch_dates:
+                # Convert to a dataframe for analysis
+                watch_df = pd.DataFrame({'date': all_watch_dates})
+                
+                # Add day of week
+                watch_df['day_of_week'] = watch_df['date'].dt.day_name()
+                watch_df['month'] = watch_df['date'].dt.month_name()
+                
+                # Create day of week visualization
+                day_counts = watch_df['day_of_week'].value_counts()
+                
+                # Get days in correct order
+                days_ordered = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                day_data = []
+                for day in days_ordered:
+                    day_data.append({'Day': day, 'Episodes Watched': day_counts.get(day, 0)})
+                
+                day_df = pd.DataFrame(day_data)
+                
+                # Create the bar chart
+                fig = px.bar(
+                    day_df,
+                    x='Day',
+                    y='Episodes Watched',
+                    title='Episodes Watched by Day of Week',
+                    color='Episodes Watched',
+                    color_continuous_scale='Viridis'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Create month visualization
+                month_counts = watch_df['month'].value_counts()
+                
+                # Get months in correct order
+                months_ordered = ['January', 'February', 'March', 'April', 
+                                 'May', 'June', 'July', 'August', 
+                                 'September', 'October', 'November', 'December']
+                month_data = []
+                for month in months_ordered:
+                    month_data.append({'Month': month, 'Episodes Watched': month_counts.get(month, 0)})
+                
+                month_df = pd.DataFrame(month_data)
+                
+                # Create the bar chart
+                fig = px.bar(
+                    month_df,
+                    x='Month',
+                    y='Episodes Watched',
+                    title='Episodes Watched by Month',
+                    color='Episodes Watched',
+                    color_continuous_scale='Viridis'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Episodes watched over time
+                watch_df['date_only'] = watch_df['date'].dt.date
+                date_counts = watch_df['date_only'].value_counts().sort_index()
+                
+                date_data = pd.DataFrame({
+                    'Date': date_counts.index,
+                    'Episodes': date_counts.values
+                })
+                
+                fig = px.line(
+                    date_data,
+                    x='Date',
+                    y='Episodes',
+                    title='TV Watching Activity Over Time',
+                    markers=True
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Could not parse any watch dates from your data.")
+        else:
+            st.info("Add watch dates to your episodes to see viewing patterns. Use the Episode Tracker to add dates when you watched each episode.")
+            
+            # Show sample data as example
+            days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            views = [5, 3, 2, 4, 8, 12, 10]
+            
+            # Create a bar chart
+            fig = px.bar(
+                x=days, 
+                y=views,
+                title='Most Popular Viewing Days (Sample Data)',
+                labels={'x': 'Day of Week', 'y': 'Episodes Watched'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 # Main app function
 def main():
