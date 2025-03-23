@@ -51,30 +51,19 @@ def get_credentials():
 @st.cache_resource
 def connect_sheets():
     try:
-        # Display what authentication methods we're trying
-        st.write("Attempting connection with available credentials...")
-        
-        # If running on Streamlit Cloud with secrets
+        # Check for secrets in Streamlit
         if hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
-            st.write("Using Streamlit secrets for authentication")
+            st.success("Using Streamlit secrets")
+            creds_dict = st.secrets["gcp_service_account"]
             credentials = service_account.Credentials.from_service_account_info(
-                st.secrets["gcp_service_account"],
+                creds_dict,
                 scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
             )
-        # If running locally with credentials file
+            client = gspread.authorize(credentials)
+            return client.open("My Favorite TV Shows")
         else:
-            st.write("Trying local credentials file")
-            try:
-                credentials = service_account.Credentials.from_service_account_file(
-                    'credentials.json',
-                    scopes=['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-                )
-            except FileNotFoundError:
-                st.error("No credentials.json file found")
-                st.stop()
-        
-        client = gspread.authorize(credentials)
-        return client.open("My Favorite TV Shows")
+            st.error("No credentials found. Please add service account credentials to Streamlit secrets.")
+            return None
     except Exception as e:
         st.error(f"Failed to connect to Google Sheets: {e}")
         return None
