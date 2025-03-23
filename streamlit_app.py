@@ -215,8 +215,8 @@ def display_overview(shows, metadata):
     # Calculate watching progress
     for show_name, df in shows.items():
         if 'Watched' in df.columns:
-# Handle different "Yes" values
-watched_count = sum(1 for watched in df['Watched'] if 
+    # Handle different "Yes" values
+                watched_count = sum(1 for watched in df['Watched'] if 
                    (watched == 'Yes' or 
                     str(watched).upper() in ['TRUE', 'YES', '1'] or
                     watched is True))            in_progress = (df['Watched'] == 'In Progress').sum()
