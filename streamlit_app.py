@@ -1,3 +1,18 @@
+# At the beginning of your app, add:
+st.write("Debug: Checking secrets...")
+if hasattr(st, 'secrets'):
+    st.write(f"Secrets available: {list(st.secrets.keys())}")
+    if 'gcp_service_account' in st.secrets:
+        st.write("Found gcp_service_account section")
+        # Print a safe subset of fields to verify
+        service_account = st.secrets['gcp_service_account']
+        st.write(f"Service account email: {service_account.get('client_email', 'Not found')}")
+        st.write(f"Project ID: {service_account.get('project_id', 'Not found')}")
+    else:
+        st.write("Missing gcp_service_account section in secrets")
+else:
+    st.write("No secrets available at all")
+    
 import streamlit as st
 import pandas as pd
 import numpy as np
