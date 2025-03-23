@@ -1,3 +1,16 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import plotly.express as px
+import plotly.graph_objects as go
+import gspread
+import json
+import os
+from datetime import datetime
+from google.oauth2 import service_account
+
 # At the beginning of your app, add:
 st.write("Debug: Checking secrets...")
 if hasattr(st, 'secrets'):
@@ -13,18 +26,6 @@ if hasattr(st, 'secrets'):
 else:
     st.write("No secrets available at all")
     
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import plotly.express as px
-import plotly.graph_objects as go
-import gspread
-import json
-import os
-from datetime import datetime
-from google.oauth2 import service_account
 
 # Configuration and setup
 st.set_page_config(
