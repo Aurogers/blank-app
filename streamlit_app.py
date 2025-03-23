@@ -19,10 +19,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Debug line to check credentials loading
+st.write("Looking for Google credentials...")
+
 # Get credentials from environment, secrets, or file
 def get_credentials():
     # Option 1: Check for environment variable
     if os.environ.get('GOOGLE_CREDENTIALS'):
+        st.success("Found credentials in environment variable")
         try:
             return json.loads(os.environ.get('GOOGLE_CREDENTIALS'))
         except json.JSONDecodeError:
@@ -30,12 +34,14 @@ def get_credentials():
     
     # Option 2: Check for Streamlit secrets
     elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
+        st.success("Found credentials in Streamlit secrets")
         return st.secrets["gcp_service_account"]
     
     # Option 3: Check for local file
     else:
         try:
             with open('credentials.json') as f:
+                st.success("Found credentials in credentials.json file")
                 return json.load(f)
         except FileNotFoundError:
             st.error("No Google credentials found. Please set GOOGLE_CREDENTIALS environment variable, add to Streamlit secrets, or provide a credentials.json file.")
@@ -61,7 +67,7 @@ def connect_sheets():
 def load_all_show_data():
     spreadsheet = connect_sheets()
     if not spreadsheet:
-        return {}
+        return {}, {}
         
     all_shows = {}
     show_metadata = {}
@@ -87,8 +93,8 @@ def load_all_show_data():
                                 'title': show_name,
                                 'total_episodes': len(df),
                                 'seasons': df['Season'].nunique() if 'Season' in df.columns else 0,
-                                'average_rating': df['Rating'].mean() if 'Rating' in df.columns else None,
-                                'longest_episode': df['Runtime'].max() if 'Runtime' in df.columns else None
+                                'average_rating': df['Rating'].mean() if 'Rating' in df.columns and df['Rating'].notna().any() else None,
+                                'longest_episode': df['Runtime'].max() if 'Runtime' in df.columns and df['Runtime'].notna().any() else None
                             }
                         
                         # Check for tracking columns, add if not present
@@ -137,7 +143,7 @@ def display_overview(shows, metadata):
     # Basic statistics
     total_shows = len(shows)
     total_episodes = sum(len(df) for df in shows.values())
-    total_seasons = sum(meta['seasons'] for meta in metadata.values())
+    total_seasons = sum(meta.get('seasons', 0) for meta in metadata.values())
     
     # Display metrics in columns
     col1, col2, col3 = st.columns(3)
@@ -292,40 +298,47 @@ def display_show_details(shows, metadata):
             if 'Runtime' in df.columns and df['Runtime'].notna().any():
                 # Clean runtime data (extract numbers if strings like "30 min")
                 if df['Runtime'].dtype == 'object':
-                    df['Runtime_Minutes'] = df['Runtime'].str.extract('(\d+)').astype(float)
+                    try:
+                        df['Runtime_Minutes'] = df['Runtime'].str.extract('(\d+)').astype(float)
+                    except Exception as e:
+                        st.warning(f"Could not parse runtime data: {e}")
+                        df['Runtime_Minutes'] = 0
                 else:
                     df['Runtime_Minutes'] = df['Runtime']
                 
                 # Runtime analysis by season
-                runtime_by_season = df.groupby('Season')['Runtime_Minutes'].mean().reset_index()
-                
-                fig = px.bar(
-                    runtime_by_season,
-                    x='Season',
-                    y='Runtime_Minutes',
-                    title=f"Average Episode Runtime by Season for {selected_show}",
-                    labels={"Runtime_Minutes": "Runtime (minutes)"}
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Runtime trend over episodes
-                if 'Season' in df.columns and 'Episode' in df.columns:
-                    # Sort by season and episode
-                    sorted_runtime = df.sort_values(['Season', 'Episode'])
+                if 'Season' in df.columns:
+                    runtime_by_season = df.groupby('Season')['Runtime_Minutes'].mean().reset_index()
                     
-                    # Create a continuous episode number for x-axis
-                    sorted_runtime['Episode_Number'] = range(1, len(sorted_runtime) + 1)
-                    
-                    fig = px.scatter(
-                        sorted_runtime,
-                        x='Episode_Number',
+                    fig = px.bar(
+                        runtime_by_season,
+                        x='Season',
                         y='Runtime_Minutes',
-                        color='Season',
-                        hover_data=['Season', 'Episode', 'Episode Title'],
-                        title=f"Episode Runtime Trend for {selected_show}",
-                        labels={"Runtime_Minutes": "Runtime (minutes)", "Episode_Number": "Episode Number (Overall)"}
+                        title=f"Average Episode Runtime by Season for {selected_show}",
+                        labels={"Runtime_Minutes": "Runtime (minutes)"}
                     )
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Runtime trend over episodes
+                    if 'Episode' in df.columns:
+                        # Sort by season and episode
+                        sorted_runtime = df.sort_values(['Season', 'Episode'])
+                        
+                        # Create a continuous episode number for x-axis
+                        sorted_runtime['Episode_Number'] = range(1, len(sorted_runtime) + 1)
+                        
+                        fig = px.scatter(
+                            sorted_runtime,
+                            x='Episode_Number',
+                            y='Runtime_Minutes',
+                            color='Season',
+                            hover_data=['Season', 'Episode', 'Episode Title'],
+                            title=f"Episode Runtime Trend for {selected_show}",
+                            labels={"Runtime_Minutes": "Runtime (minutes)", "Episode_Number": "Episode Number (Overall)"}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Season data not available for runtime analysis.")
             else:
                 st.info("No runtime data available for this show.")
 
@@ -425,7 +438,7 @@ def display_episode_tracker(shows, metadata):
                 st.metric("In Progress", in_progress)
             
             # Episode list with tracking options
-            for i, (_, row) in enumerate(filtered_df.iterrows()):
+            for i, (idx, row) in enumerate(filtered_df.iterrows()):
                 # Prepare episode info
                 episode_title = row.get('Episode Title', f"Episode {row.get('Episode', '?')}")
                 season_num = row.get('Season', '?')
@@ -464,9 +477,14 @@ def display_episode_tracker(shows, metadata):
                         current_rating = row.get('Personal Rating')
                         if pd.isna(current_rating):
                             current_rating = 0
+                        try:
+                            current_rating = int(float(current_rating))
+                        except:
+                            current_rating = 0
+                        
                         new_rating = st.slider(
                             "Your Rating",
-                            0, 10, int(current_rating),
+                            0, 10, current_rating,
                             key=f"{key_prefix}_rating"
                         )
                         
@@ -499,12 +517,48 @@ def display_episode_tracker(shows, metadata):
                         
                         # Update button
                         if st.button("Update", key=f"{key_prefix}_update"):
-                            # TODO: Implement updating Google Sheet
-                            # This would require finding the row in the sheet and updating cells
-                            st.success("Episode status updated!")
+                            # Get the worksheet
+                            try:
+                                spreadsheet = connect_sheets()
+                                sheet = spreadsheet.worksheet(selected_show)
+                                
+                                # Get the row number in the sheet (add 2 to account for 0-indexing and header row)
+                                sheet_row = idx + 2
+                                
+                                # Update the cells
+                                updates = []
+                                
+                                # Find column indexes
+                                header_row = sheet.row_values(1)
+                                watched_col = header_row.index('Watched') + 1 if 'Watched' in header_row else None
+                                rating_col = header_row.index('Personal Rating') + 1 if 'Personal Rating' in header_row else None
+                                favorite_col = header_row.index('Favorite') + 1 if 'Favorite' in header_row else None
+                                date_col = header_row.index('Watch Date') + 1 if 'Watch Date' in header_row else None
+                                
+                                # Update watched status
+                                if watched_col:
+                                    sheet.update_cell(sheet_row, watched_col, new_status)
+                                    updates.append(f"Watched={new_status}")
+                                
+                                # Update personal rating
+                                if rating_col:
+                                    sheet.update_cell(sheet_row, rating_col, new_rating)
+                                    updates.append(f"Rating={new_rating}")
+                                
+                                # Update favorite
+                                if favorite_col:
+                                    sheet.update_cell(sheet_row, favorite_col, 'Yes' if new_favorite else 'No')
+                                    updates.append(f"Favorite={'Yes' if new_favorite else 'No'}")
+                                
+                                # Update watch date
+                                if date_col and new_date:
+                                    sheet.update_cell(sheet_row, date_col, new_date.strftime('%Y-%m-%d'))
+                                    updates.append(f"Date={new_date.strftime('%Y-%m-%d')}")
+                                
+                                st.success(f"Episode updated! {', '.join(updates)}")
                             
-                            # For demo purposes - would actually update the Google Sheet
-                            st.write(f"Updated: Watched={new_status}, Rating={new_rating}, Favorite={'Yes' if new_favorite else 'No'}")
+                            except Exception as e:
+                                st.error(f"Failed to update: {e}")
 
 # Analysis dashboard
 def display_analysis(shows, metadata):
@@ -649,32 +703,3 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
-
-
-# At the top after imports
-st.write("Looking for Google credentials...")
-
-# In the get_credentials function
-def get_credentials():
-    # Option 1: Check for environment variable
-    if os.environ.get('GOOGLE_CREDENTIALS'):
-        st.success("Found credentials in environment variable")
-        try:
-            return json.loads(os.environ.get('GOOGLE_CREDENTIALS'))
-        except json.JSONDecodeError:
-            st.error("Invalid JSON in GOOGLE_CREDENTIALS environment variable")
-    
-    # Option 2: Check for Streamlit secrets
-    elif hasattr(st, 'secrets') and 'gcp_service_account' in st.secrets:
-        st.success("Found credentials in Streamlit secrets")
-        return st.secrets["gcp_service_account"]
-    
-    # Option 3: Check for local file
-    else:
-        try:
-            with open('credentials.json') as f:
-                st.success("Found credentials in credentials.json file")
-                return json.load(f)
-        except FileNotFoundError:
-            st.error("No Google credentials found in any location")
-            st.stop()
