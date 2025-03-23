@@ -219,7 +219,7 @@ def display_overview(shows, metadata):
                 watched_count = sum(1 for watched in df['Watched'] if 
                    (watched == 'Yes' or 
                     str(watched).upper() in ['TRUE', 'YES', '1'] or
-                    watched is True))            in_progress = (df['Watched'] == 'In Progress').sum()
+                    watched is True)) in_progress = (df['Watched'] == 'In Progress').sum()
             total_count = len(df)
             
             # Calculate progress percentage
